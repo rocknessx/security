@@ -1,298 +1,139 @@
-using UnityEngine;
-using UnityEngine.UI;
 using System.Collections.Generic;
+using UnityEngine;
 using System.Text;
 
 namespace AntiCheatSystem
 {
     public class DebugLogger : MonoBehaviour
     {
-        [Header("UI References")]
-        public Text logText;
-        public ScrollRect scrollRect;
-        public Scrollbar verticalScrollbar;
+        [Header("Debug Logger Settings")]
+        public int maxLogEntries = 1000;
+        public bool enableTimestamp = true;
+        public bool enableLogType = true;
         
-        [Header("Settings")]
-        public int maxLines = 999999;
-        public bool autoScroll = false;
-        public bool wordWrap = true;
-        public float lineHeight = 16f;
-        public bool captureUnityLogs = true;
-        public bool showAllLogs = true;
+        private List<LogEntry> logEntries = new List<LogEntry>();
+        private System.Action<string> onLogUpdated;
         
-        private List<string> logLines = new List<string>();
-        private StringBuilder stringBuilder = new StringBuilder();
+        public static DebugLogger Instance { get; private set; }
         
-        void Start()
+        [System.Serializable]
+        public class LogEntry
         {
-            // AntiCheat sistemine event bağla
-            UnifiedAntiCheatSystem.OnSecurityViolationDetected += OnSecurityViolation;
+            public string message;
+            public LogType logType;
+            public string timestamp;
+            public string fullText;
             
-            // Unity log'larını yakala
-            if (captureUnityLogs)
+            public LogEntry(string msg, LogType type)
             {
-                Application.logMessageReceived += OnUnityLogReceived;
-            }
-            
-            // İlk mesaj
-            AddLog("Debug Logger Started - Ready to display AntiCheat information");
-            AddLog("Unity Console logs will be captured and displayed here");
-            AddLog($"Max Lines: {maxLines} (Unlimited)");
-            
-            // Scroll ayarlarını düzelt
-            SetupScrollRect();
-        }
-        
-        void OnUnityLogReceived(string logString, string stackTrace, LogType type)
-        {
-            if (showAllLogs || logString.Contains("[AntiCheat]") || logString.Contains("AntiCheat"))
-            {
-                string logType = type.ToString();
-                string colorTag = GetLogColor(type);
-                
-                string cleanLog = logString;
-                if (cleanLog.Contains("UnityEngine.Debug:Log"))
-                {
-                    cleanLog = cleanLog.Split(new string[] { "UnityEngine.Debug:Log" }, System.StringSplitOptions.None)[0].Trim();
-                }
-                
-                if (cleanLog.Length > 200)
-                {
-                    cleanLog = cleanLog.Substring(0, 200) + "...";
-                }
-                
-                AddLog($"{colorTag}[UNITY-{logType}] {cleanLog}</color>");
+                message = msg;
+                logType = type;
+                timestamp = System.DateTime.Now.ToString("HH:mm:ss");
+                fullText = $"[{timestamp}] {type}: {msg}";
             }
         }
         
-        string GetLogColor(LogType type)
+        public enum LogType
         {
-            switch (type)
-            {
-                case LogType.Error:
-                    return "<color=#FF0000>";
-                case LogType.Warning:
-                    return "<color=#FFFF00>";
-                case LogType.Assert:
-                    return "<color=#FF8000>";
-                default:
-                    return "<color=#00FFFF>";
-            }
+            Log,
+            Warning,
+            Error
         }
         
-        void SetupScrollRect()
+        void Awake()
         {
-            if (scrollRect != null)
+            if (Instance == null)
             {
-                // ScrollRect ayarları
-                scrollRect.horizontal = false;
-                scrollRect.vertical = true;
-                scrollRect.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.Permanent;
-                scrollRect.scrollSensitivity = 20f;
-                scrollRect.movementType = ScrollRect.MovementType.Elastic;
-                scrollRect.elasticity = 0.1f;
-                
-                // Scrollbar'ı bağla
-                if (verticalScrollbar != null)
-                {
-                    scrollRect.verticalScrollbar = verticalScrollbar;
-                }
-                
-                // Content RectTransform ayarları - DÜZELTME
-                if (scrollRect.content != null)
-                {
-                    RectTransform contentRect = scrollRect.content;
-                    contentRect.anchorMin = new Vector2(0, 0);
-                    contentRect.anchorMax = new Vector2(1, 1);
-                    contentRect.pivot = new Vector2(0.5f, 0.5f);
-                    contentRect.anchoredPosition = Vector2.zero;
-                    contentRect.offsetMin = Vector2.zero;
-                    contentRect.offsetMax = Vector2.zero;
-                }
-            }
-            
-            // Scrollbar ayarları
-            if (verticalScrollbar != null)
-            {
-                verticalScrollbar.direction = Scrollbar.Direction.BottomToTop;
-                verticalScrollbar.size = 0.1f;
-                
-                CanvasGroup scrollbarCanvasGroup = verticalScrollbar.GetComponent<CanvasGroup>();
-                if (scrollbarCanvasGroup == null)
-                {
-                    scrollbarCanvasGroup = verticalScrollbar.gameObject.AddComponent<CanvasGroup>();
-                }
-                scrollbarCanvasGroup.alpha = 1f;
-                scrollbarCanvasGroup.interactable = true;
-                scrollbarCanvasGroup.blocksRaycasts = true;
-            }
-        }
-        
-        public void AddLog(string message)
-        {
-            string timestamp = System.DateTime.Now.ToString("HH:mm:ss");
-            string colorTag = GetMessageColor(message);
-            string logEntry = $"[{timestamp}] {colorTag}{message}</color>";
-            
-            if (message.Length > 100 && wordWrap)
-            {
-                string[] lines = message.Split('\n');
-                foreach (string line in lines)
-                {
-                    if (!string.IsNullOrEmpty(line.Trim()))
-                    {
-                        logLines.Add($"[{timestamp}] {colorTag}{line}</color>");
-                    }
-                }
+                Instance = this;
+                DontDestroyOnLoad(gameObject);
             }
             else
             {
-                logLines.Add(logEntry);
+                Destroy(gameObject);
             }
+        }
+        
+        public void Log(string message)
+        {
+            AddLogEntry(message, LogType.Log);
+        }
+        
+        public void LogWarning(string message)
+        {
+            AddLogEntry(message, LogType.Warning);
+        }
+        
+        public void LogError(string message)
+        {
+            AddLogEntry(message, LogType.Error);
+        }
+        
+        private void AddLogEntry(string message, LogType logType)
+        {
+            var entry = new LogEntry(message, logType);
+            logEntries.Add(entry);
             
-            if (logLines.Count > maxLines)
+            // Maksimum log sayısını aş
+            if (logEntries.Count > maxLogEntries)
             {
-                int removeCount = maxLines / 10;
-                logLines.RemoveRange(0, removeCount);
+                logEntries.RemoveAt(0);
             }
             
-            UpdateLogText();
-            UpdateContentSize();
+            // UI'yi güncelle
+            onLogUpdated?.Invoke(GetAllLogsAsString());
             
-            if (autoScroll && scrollRect != null)
+            // Console'a da yazdır (Unity'nin kendi debug sistemi için)
+            switch (logType)
             {
-                StartCoroutine(ScrollToBottom());
+                case LogType.Log:
+                    Debug.Log(message);
+                    break;
+                case LogType.Warning:
+                    Debug.LogWarning(message);
+                    break;
+                case LogType.Error:
+                    Debug.LogError(message);
+                    break;
             }
         }
         
-        string GetMessageColor(string message)
+        public string GetAllLogsAsString()
         {
-            if (message.Contains("SECURITY VIOLATION") || message.Contains("CRITICAL"))
-                return "<color=#FF0000>";
-            
-            if (message.Contains("Risk Score: 100") || message.Contains("Risk Score: 8") || message.Contains("Risk Score: 9"))
-                return "<color=#FF0000>";
-            
-            if (message.Contains("Risk Score: 6") || message.Contains("Risk Score: 7"))
-                return "<color=#FF8000>";
-            
-            if (message.Contains("Risk Score: 4") || message.Contains("Risk Score: 5"))
-                return "<color=#FFFF00>";
-            
-            if (message.Contains("Risk Score: 0") || message.Contains("Risk Score: 1") || message.Contains("Risk Score: 2") || message.Contains("Risk Score: 3"))
-                return "<color=#00FF00>";
-            
-            if (message.Contains("Emulator") || message.Contains("Cheat Tools") || message.Contains("Virtual Machine"))
-                return "<color=#FF0000>";
-            
-            if (message.Contains("VM Evidence") || message.Contains("Virtual Network"))
-                return "<color=#FF8000>";
-            
-            if (message.Contains("Platform:") || message.Contains("Device ID:") || message.Contains("Processor"))
-                return "<color=#00FFFF>";
-            
-            if (message.Contains("JSON") || message.Contains("Fingerprint"))
-                return "<color=#FF00FF>";
-            
-            if (message.Contains("ERROR") || message.Contains("Error"))
-                return "<color=#FF0000>";
-            
-            if (message.Contains("WARNING") || message.Contains("Warning"))
-                return "<color=#FFFF00>";
-            
-            return "<color=#FFFFFF>";
-        }
-        
-        void UpdateLogText()
-        {
-            if (logText == null) return;
-            
-            stringBuilder.Clear();
-            foreach (string line in logLines)
+            var sb = new StringBuilder();
+            foreach (var entry in logEntries)
             {
-                stringBuilder.AppendLine(line);
+                sb.AppendLine(entry.fullText);
             }
-            
-            logText.text = stringBuilder.ToString();
+            return sb.ToString();
         }
         
-        void UpdateContentSize()
+        public List<LogEntry> GetAllLogs()
         {
-            if (scrollRect == null || scrollRect.content == null || logText == null) return;
-            
-            // Content boyutunu log satır sayısına göre hesapla
-            float contentHeight = logLines.Count * lineHeight;
-            
-            // Minimum height viewport boyutu kadar olsun
-            float viewportHeight = scrollRect.viewport.rect.height;
-            contentHeight = Mathf.Max(contentHeight, viewportHeight);
-            
-            // Content boyutunu güncelle
-            RectTransform contentRect = scrollRect.content;
-            contentRect.sizeDelta = new Vector2(0, contentHeight);
-            
-            // Content positioning'i düzelt - Top'u 0'da tut
-            contentRect.anchoredPosition = new Vector2(0, 0);
-            
-            // Text'in de boyutunu güncelle - Top'u 0'da tut
-            RectTransform textRect = logText.rectTransform;
-            textRect.sizeDelta = new Vector2(0, contentHeight);
-            textRect.anchoredPosition = new Vector2(0, 0);
-            
-            // Text'in anchor'larını düzelt
-            textRect.anchorMin = new Vector2(0, 0);
-            textRect.anchorMax = new Vector2(1, 1);
-            textRect.offsetMin = new Vector2(5, 5);
-            textRect.offsetMax = new Vector2(-5, -5);
-            
-            // Scrollbar'ı güncelle
-            if (verticalScrollbar != null)
-            {
-                verticalScrollbar.size = Mathf.Clamp01(viewportHeight / contentHeight);
-            }
+            return new List<LogEntry>(logEntries);
         }
         
-        System.Collections.IEnumerator ScrollToBottom()
+        public void ClearLogs()
         {
-            yield return new WaitForEndOfFrame();
-            if (scrollRect != null)
-            {
-                Canvas.ForceUpdateCanvases();
-                scrollRect.verticalNormalizedPosition = 0f;
-            }
+            logEntries.Clear();
+            onLogUpdated?.Invoke("");
         }
         
-        void OnSecurityViolation(UnifiedAntiCheatSystem.SystemFingerprint fingerprint)
+        public void SubscribeToLogUpdates(System.Action<string> callback)
         {
-            AddLog($"SECURITY VIOLATION DETECTED!");
-            AddLog($"Risk Score: {fingerprint.risk.totalRiskScore}%");
-            AddLog($"Risk Level: {fingerprint.risk.riskLevel}");
-            AddLog($"Threats: {string.Join(", ", fingerprint.risk.detectedThreats)}");
+            onLogUpdated += callback;
         }
         
-        [ContextMenu("Clear All Logs")]
-        public void ClearAllLogs()
+        public void UnsubscribeFromLogUpdates(System.Action<string> callback)
         {
-            logLines.Clear();
-            UpdateLogText();
-            UpdateContentSize();
-            AddLog("All logs cleared");
+            onLogUpdated -= callback;
         }
         
-        [ContextMenu("Show Log Count")]
-        public void ShowLogCount()
+        public void CopyAllLogsToClipboard()
         {
-            AddLog($"Total log lines: {logLines.Count}");
-        }
-        
-        void OnDestroy()
-        {
-            UnifiedAntiCheatSystem.OnSecurityViolationDetected -= OnSecurityViolation;
-            
-            if (captureUnityLogs)
-            {
-                Application.logMessageReceived -= OnUnityLogReceived;
-            }
+            string allLogs = GetAllLogsAsString();
+            GUIUtility.systemCopyBuffer = allLogs;
+            Debug.Log("Debug logs copied to clipboard!");
         }
     }
 }
+
